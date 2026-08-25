@@ -185,9 +185,20 @@ public class GameFlowManager : NetworkBehaviour
         }
     }
 
-    public void RegisterConnectionApproval()
+    // Muss auf BEIDEN Seiten identisch gesetzt sein. Client und Server serialisieren die
+    // Verbindungsanfrage unterschiedlich, je nachdem ob ConnectionApproval an ist: der Client
+    // hängt seine ConnectionData nur dann an, der Server liest sie nur dann. Steht das Flag
+    // nur beim Host, verwirft dieser die Anfrage mit
+    // "Incomplete connection request message given config - possible NetworkConfig mismatch."
+    private void EnableConnectionApproval()
     {
         NetworkManager.Singleton.NetworkConfig.ConnectionApproval = true;
+    }
+
+    // Nur der Host vergibt Slots und Spawnpositionen, braucht also zusätzlich den Callback.
+    public void RegisterConnectionApproval()
+    {
+        EnableConnectionApproval();
         NetworkManager.Singleton.ConnectionApprovalCallback = ApprovalCheck;
     }
 
@@ -532,6 +543,7 @@ public class GameFlowManager : NetworkBehaviour
             transport.SetRelayServerData(new RelayServerData(joinAllocation, "dtls"));
 
             singleplayerMode = false;
+            EnableConnectionApproval();
             NetworkManager.Singleton.StartClient();
             HideMenu();
         }
