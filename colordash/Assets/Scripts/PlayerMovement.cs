@@ -19,8 +19,8 @@ public class PlayerMovement : NetworkBehaviour
     public float crouchSpeed = 3f;
 
     [Header("Slippery Floor")]
-    public float groundAcceleration = 4f;
-    public float airAcceleration = 2f;
+    public float groundAcceleration = 30f;
+    public float airAcceleration = 10f;
 
     [Header("Fail-safe")]
     public float fallRespawnHeight = -10f;

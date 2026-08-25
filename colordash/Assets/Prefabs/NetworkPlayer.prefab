@@ -925,17 +925,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
   playerCamera: {fileID: 423612665367273899}
-  walkSpeed: 1
-  runSpeed: 2
-  jumpPower: 3.5
-  gravity: 12
-  lookSpeed: 0.25
+  walkSpeed: 5
+  runSpeed: 9
+  jumpPower: 6.5
+  gravity: 16
   lookXLimit: 67
   defaultHeight: 2
   crouchHeight: 1
   crouchSpeed: 3
-  groundAcceleration: 4
-  airAcceleration: 2
+  crouchLerpSpeed: 12
+  groundAcceleration: 30
+  airAcceleration: 10
   fallRespawnHeight: -10
 --- !u!114 &4032620418186926278
 MonoBehaviour:
