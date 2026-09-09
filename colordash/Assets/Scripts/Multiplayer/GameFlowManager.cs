@@ -69,6 +69,7 @@ public class GameFlowManager : NetworkBehaviour
     private bool isBusy = false;
     private string hostJoinCode = "";
     private readonly StringBuilder hudBuilder = new StringBuilder();
+    private bool pendingPersonalRecord;
 
     async void Awake()
     {
@@ -165,6 +166,9 @@ public class GameFlowManager : NetworkBehaviour
             else if (readyClientIds.Contains(pm.OwnerClientId))
                 hudBuilder.Append("  - BEREIT");
         }
+
+        if (GameSettings.BestRound > 0)
+            hudBuilder.Append('\n').Append("Bester Lauf: Runde ").Append(GameSettings.BestRound);
 
         return hudBuilder.ToString();
     }
@@ -318,6 +322,7 @@ public class GameFlowManager : NetworkBehaviour
 
         TeleportClientToSpawn(senderId, lobbySpawnPoints);
         SetSpectating(senderId, true);
+        ReportPersonalScore(senderId, colorDashManager != null ? colorDashManager.CurrentRound : 0);
 
         EvaluateRoundEnd();
     }
@@ -376,12 +381,32 @@ public class GameFlowManager : NetworkBehaviour
             TeleportClientToSpawn(clientId, lobbySpawnPoints);
         }
 
+        foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
+            if (!fallenClientIds.Contains(clientId)) ReportPersonalScore(clientId, roundsSurvived);
+
         readyClientIds.Clear();
         fallenClientIds.Clear();
 
         FixedString64Bytes winnerName = hasWinner ? NameOf(winnerId) : "";
 
         AnnounceRoundEndClientRpc(winnerName, winnerId, hasWinner, solo, roundsSurvived);
+    }
+
+    private void ReportPersonalScore(ulong clientId, int round)
+    {
+        if (round <= 0) return;
+
+        ReportPersonalScoreClientRpc(round, new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+        });
+    }
+
+    // Laeuft nur beim betroffenen Spieler: sein persoenlicher Rekord ist reine Geraete-Sache.
+    [ClientRpc]
+    private void ReportPersonalScoreClientRpc(int round, ClientRpcParams rpcParams = default)
+    {
+        if (GameSettings.ReportRound(round)) pendingPersonalRecord = true;
     }
 
     private string NameOf(ulong clientId)
@@ -434,6 +459,13 @@ public class GameFlowManager : NetworkBehaviour
         {
             message = $"{winnerName} gewinnt! (Runde {rounds})";
             color = Color.white;
+        }
+
+        if (pendingPersonalRecord)
+        {
+            pendingPersonalRecord = false;
+            message += "\nNeuer persönlicher Rekord!";
+            color = UIFactory.Accent;
         }
 
         colorDashManager.ShowBanner(message, color, 5f);

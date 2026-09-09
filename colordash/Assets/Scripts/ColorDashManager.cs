@@ -11,6 +11,11 @@ public class ColorDashManager : NetworkBehaviour
 {
     public enum TileColor { Red, Green, Blue, Yellow, Orange, Violet, Black, White }
 
+    // Genau drei Modifikatoren, ab modifierStartRound wird jede Runde einer davon ausgewürfelt.
+    public enum RoundModifier { None = 0, SlipperyFloor = 1, LowGravity = 2, InvertedCamera = 3 }
+
+    public static ColorDashManager Instance { get; private set; }
+
     [Header("Setup")]
     public Transform tilesParent;
 
@@ -24,6 +29,8 @@ public class ColorDashManager : NetworkBehaviour
     public int multiAnnounceStartRound = 10;
     public int multiAnnounceRoundStep = 10;
     public int maxAnnounceCount = 4;
+    [Tooltip("Ab dieser Runde ist in jeder Runde einer der drei Modifikatoren aktiv.")]
+    public int modifierStartRound = 10;
 
     [Header("Feedback")]
     [Tooltip("Sekunden vor dem Verschwinden, ab denen die betroffenen Tiles wackeln.")]
@@ -44,6 +51,7 @@ public class ColorDashManager : NetworkBehaviour
     private TextMeshProUGUI announcementText;
     private TextMeshProUGUI sequenceText;
     private TextMeshProUGUI roundText;
+    private TextMeshProUGUI modifierText;
     private TextMeshProUGUI bannerText;
     private TextMeshProUGUI spectatorText;
     private Image countdownBar;
@@ -65,6 +73,7 @@ public class ColorDashManager : NetworkBehaviour
     private readonly NetworkVariable<FixedString128Bytes> netSequenceCsv = new NetworkVariable<FixedString128Bytes>("");
     private readonly NetworkVariable<int> netCurrentStepIndex = new NetworkVariable<int>(-1);
     private readonly NetworkVariable<bool> netTilesHidden = new NetworkVariable<bool>(false);
+    private readonly NetworkVariable<int> netModifier = new NetworkVariable<int>(0);
 
     // Ende der aktuellen Phase auf der synchronisierten Serverzeit - Basis für den Countdown-Balken.
     private readonly NetworkVariable<double> netPhaseEndTime = new NetworkVariable<double>(0d);
@@ -73,8 +82,24 @@ public class ColorDashManager : NetworkBehaviour
     public bool IsRoundRunning => isGameActive.Value;
     public int CurrentRound => netRoundNumber.Value;
 
+    // Von PlayerMovement gelesen, um Bewegung/Kamera pro Runde zu verbiegen.
+    public RoundModifier CurrentModifier => isGameActive.Value ? (RoundModifier)netModifier.Value : RoundModifier.None;
+
+    public static string GetModifierName(RoundModifier modifier)
+    {
+        switch (modifier)
+        {
+            case RoundModifier.SlipperyFloor: return "Rutschiger Boden";
+            case RoundModifier.LowGravity: return "Niedrige Schwerkraft";
+            case RoundModifier.InvertedCamera: return "Umgekehrte Kamera";
+            default: return "";
+        }
+    }
+
     void Awake()
     {
+        Instance = this;
+
         if (tilesParent == null)
         {
             GameObject tiles = GameObject.Find("Tiles");
@@ -94,6 +119,7 @@ public class ColorDashManager : NetworkBehaviour
         netSequenceCsv.OnValueChanged += (_, __) => ApplyVisuals();
         netCurrentStepIndex.OnValueChanged += (_, __) => ApplyVisuals();
         netTilesHidden.OnValueChanged += (_, __) => ApplyVisuals();
+        netModifier.OnValueChanged += (_, __) => ApplyVisuals();
 
         ApplyVisuals();
 
@@ -103,6 +129,12 @@ public class ColorDashManager : NetworkBehaviour
     public override void OnNetworkDespawn()
     {
         if (IsServer) StopAllCoroutines();
+    }
+
+    public override void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+        base.OnDestroy();
     }
 
     // Called by GameFlowManager (server-only) to start/stop a round session.
@@ -122,7 +154,16 @@ public class ColorDashManager : NetworkBehaviour
             netTilesHidden.Value = false;
             netPhaseDuration.Value = 0f;
             netPhaseEndTime.Value = 0d;
+            netModifier.Value = (int)RoundModifier.None;
         }
+    }
+
+    // Ab modifierStartRound ist immer genau einer der drei Modifikatoren aktiv,
+    // neu ausgewuerfelt fuer jede Runde.
+    private RoundModifier PickModifier(int round)
+    {
+        if (round < modifierStartRound) return RoundModifier.None;
+        return (RoundModifier)Random.Range(1, 4);
     }
 
     void CollectTiles()
@@ -189,9 +230,14 @@ public class ColorDashManager : NetworkBehaviour
             new Vector2(1f, 1f), new Vector2(-30, -30), new Vector2(300, 50));
         UIFactory.SetOutline(roundText, 0.18f, Color.black);
 
-        bannerText = UIFactory.CreateText(canvas.transform, "BannerText", "", 56f,
+        modifierText = UIFactory.CreateText(canvas.transform, "ModifierText", "", 24f,
+            FontStyles.Bold, new Color(1f, 0.55f, 0.15f), TextAlignmentOptions.TopRight,
+            new Vector2(1f, 1f), new Vector2(-30, -66), new Vector2(420, 40));
+        UIFactory.SetOutline(modifierText, 0.18f, Color.black);
+
+        bannerText = UIFactory.CreateText(canvas.transform, "BannerText", "", 52f,
             FontStyles.Bold, UIFactory.Accent, TextAlignmentOptions.Center,
-            new Vector2(0.5f, 0.5f), new Vector2(0, 40), new Vector2(1100, 90));
+            new Vector2(0.5f, 0.5f), new Vector2(0, 40), new Vector2(1100, 170));
         UIFactory.SetOutline(bannerText, 0.25f, Color.black);
 
         spectatorText = UIFactory.CreateText(canvas.transform, "SpectatorText", "", 24f,
@@ -266,6 +312,7 @@ public class ColorDashManager : NetworkBehaviour
 
             roundNumber++;
             netRoundNumber.Value = roundNumber;
+            netModifier.Value = (int)PickModifier(roundNumber);
 
             int announceCount = GetAnnounceCount(roundNumber);
             List<TileColor> sequence = PickColorSequence(announceCount, available);
@@ -309,6 +356,12 @@ public class ColorDashManager : NetworkBehaviour
     void ApplyVisuals()
     {
         if (roundText != null) roundText.text = isGameActive.Value ? $"Runde {netRoundNumber.Value}" : "";
+
+        if (modifierText != null)
+        {
+            string modifierName = GetModifierName(CurrentModifier);
+            modifierText.text = string.IsNullOrEmpty(modifierName) ? "" : $"! {modifierName}";
+        }
 
         List<TileColor> seq = ParseSequence(netSequenceCsv.Value.ToString());
         int step = netCurrentStepIndex.Value;
