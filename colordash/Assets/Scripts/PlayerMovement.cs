@@ -30,6 +30,23 @@ public class PlayerMovement : NetworkBehaviour
     [Header("Fail-safe")]
     public float fallRespawnHeight = -10f;
 
+    [Header("Schubsen")]
+    public float pushRange = 2.8f;
+    public float pushForce = 15f;
+    public float pushUpForce = 3.5f;
+    public float pushCooldown = 0.9f;
+    [Tooltip("Wie genau man zielen muss: 1 = exakt nach vorn, 0 = auch seitlich.")]
+    public float pushAimTolerance = 0.25f;
+
+    [Header("Rundenmodifikatoren")]
+    public float slipperyAccelerationFactor = 0.18f;
+    public float lowGravityFactor = 0.45f;
+    public float lowGravityJumpFactor = 1.2f;
+
+    // Emote-Texte fuer die Tasten 1-4.
+    public static readonly string[] Emotes = { "Hi!", "GG!", "Ups!", "Los!" };
+    private const float EmoteDuration = 2.5f;
+
     private Vector3 moveDirection = Vector3.zero;
     private float rotationX = 0;
     private CharacterController characterController;
@@ -48,6 +65,10 @@ public class PlayerMovement : NetworkBehaviour
 
     private bool wasGrounded = true;
     private SpectatorCamera spectator;
+    private PlayerNametag nametag;
+    private float pushCooldownTimer;
+    private float emoteCooldownTimer;
+    private double serverPushReadyTime;
 
     private readonly NetworkVariable<bool> netIsSpectating = new NetworkVariable<bool>(false);
     private readonly NetworkVariable<FixedString32Bytes> netName = new NetworkVariable<FixedString32Bytes>(
@@ -102,6 +123,9 @@ public class PlayerMovement : NetworkBehaviour
         {
             playerCamera.gameObject.SetActive(false);
         }
+
+        // Namensschild fuer JEDEN Spieler auf jedem Client - das eigene blendet sich selbst aus.
+        nametag = PlayerNametag.Create(this);
     }
 
     public override void OnNetworkDespawn()
@@ -112,6 +136,7 @@ public class PlayerMovement : NetworkBehaviour
         // Die Zuschauerkamera hängt die Kamera vom Spieler ab - vor dem Zerstören zurückhängen,
         // sonst bleibt ein verwaistes Kameraobjekt in der Szene stehen.
         if (spectator != null) spectator.End();
+        if (nametag != null) Destroy(nametag.gameObject);
 
         if (IsOwner && LocalPlayer == this) LocalPlayer = null;
     }
@@ -135,6 +160,9 @@ public class PlayerMovement : NetworkBehaviour
         if (mouse == null) mouse = Mouse.current;
         if (keyboard == null || mouse == null) return;
 
+        pushCooldownTimer -= Time.deltaTime;
+        emoteCooldownTimer -= Time.deltaTime;
+
         // Im Zuschauermodus übernimmt SpectatorCamera; der Körper wird vom Server geparkt.
         if (netIsSpectating.Value)
         {
@@ -155,6 +183,12 @@ public class PlayerMovement : NetworkBehaviour
 
         Vector2 mouseDelta = inputBlocked ? Vector2.zero : mouse.delta.ReadValue();
 
+        ColorDashManager.RoundModifier modifier = ColorDashManager.Instance != null
+            ? ColorDashManager.Instance.CurrentModifier
+            : ColorDashManager.RoundModifier.None;
+
+        if (!inputBlocked) HandleInteractionInput();
+
         // Ducken senkt die Geschwindigkeit, ohne die Inspector-Werte zu zerstören.
         float targetWalk = crouchPressed ? crouchSpeed : baseWalkSpeed;
         float targetRun = crouchPressed ? crouchSpeed : baseRunSpeed;
@@ -171,14 +205,17 @@ public class PlayerMovement : NetworkBehaviour
         // so momentum carries the player past where they meant to stop.
         Vector3 targetHorizontalMove = (forward * curSpeedX) + (right * curSpeedY);
         Vector3 currentHorizontalMove = new Vector3(moveDirection.x, 0f, moveDirection.z);
-        float accel = characterController.isGrounded ? groundAcceleration : airAcceleration;
+        float accelFactor = modifier == ColorDashManager.RoundModifier.SlipperyFloor ? slipperyAccelerationFactor : 1f;
+        float accel = (characterController.isGrounded ? groundAcceleration : airAcceleration) * accelFactor;
         currentHorizontalMove = Vector3.MoveTowards(currentHorizontalMove, targetHorizontalMove, accel * Time.deltaTime);
 
         moveDirection = currentHorizontalMove;
 
         if (jumpPressed && canMove && characterController.isGrounded)
         {
-            moveDirection.y = jumpPower;
+            moveDirection.y = modifier == ColorDashManager.RoundModifier.LowGravity
+                ? jumpPower * lowGravityJumpFactor
+                : jumpPower;
             GameAudio.Instance?.PlayJump();
         }
         else
@@ -188,7 +225,8 @@ public class PlayerMovement : NetworkBehaviour
 
         if (!characterController.isGrounded)
         {
-            moveDirection.y -= gravity * Time.deltaTime;
+            float gravityFactor = modifier == ColorDashManager.RoundModifier.LowGravity ? lowGravityFactor : 1f;
+            moveDirection.y -= gravity * gravityFactor * Time.deltaTime;
         }
 
         float verticalBeforeMove = moveDirection.y;
@@ -201,12 +239,14 @@ public class PlayerMovement : NetworkBehaviour
         if (canMove && !inputBlocked)
         {
             float sensitivity = GameSettings.MouseSensitivity;
-            float verticalDelta = GameSettings.InvertY ? mouseDelta.y : -mouseDelta.y;
+            // Der Modifikator dreht beide Achsen um - deutlich fieser als nur Y.
+            float invert = modifier == ColorDashManager.RoundModifier.InvertedCamera ? -1f : 1f;
+            float verticalDelta = (GameSettings.InvertY ? mouseDelta.y : -mouseDelta.y) * invert;
 
             rotationX += verticalDelta * sensitivity;
             rotationX = Mathf.Clamp(rotationX, -lookXLimit, lookXLimit);
             playerCamera.transform.localRotation = Quaternion.Euler(rotationX, 0, 0);
-            transform.rotation *= Quaternion.Euler(0, mouseDelta.x * sensitivity, 0);
+            transform.rotation *= Quaternion.Euler(0, mouseDelta.x * sensitivity * invert, 0);
         }
 
         if (transform.position.y < fallRespawnHeight)
@@ -222,6 +262,107 @@ public class PlayerMovement : NetworkBehaviour
         {
             hasReportedFall = false;
         }
+    }
+
+    // Schubsen (F) und Emotes (1-4) - beide laufen ueber den Server, damit niemand
+    // die Position anderer Spieler direkt manipulieren kann.
+    private void HandleInteractionInput()
+    {
+        if (keyboard.fKey.wasPressedThisFrame && pushCooldownTimer <= 0f)
+        {
+            pushCooldownTimer = pushCooldown;
+            RequestPushServerRpc();
+        }
+
+        if (emoteCooldownTimer > 0f) return;
+
+        for (int i = 0; i < Emotes.Length; i++)
+        {
+            if (!WasEmoteKeyPressed(i)) continue;
+
+            emoteCooldownTimer = 1f;
+            GameAudio.Instance?.PlayUi();
+            RequestEmoteServerRpc(i);
+            break;
+        }
+    }
+
+    private bool WasEmoteKeyPressed(int index)
+    {
+        switch (index)
+        {
+            case 0: return keyboard.digit1Key.wasPressedThisFrame;
+            case 1: return keyboard.digit2Key.wasPressedThisFrame;
+            case 2: return keyboard.digit3Key.wasPressedThisFrame;
+            case 3: return keyboard.digit4Key.wasPressedThisFrame;
+            default: return false;
+        }
+    }
+
+    [ServerRpc]
+    private void RequestPushServerRpc()
+    {
+        // Cooldown auch serverseitig, sonst laesst er sich clientseitig einfach aushebeln.
+        double now = NetworkManager.ServerTime.Time;
+        if (now < serverPushReadyTime) return;
+        serverPushReadyTime = now + pushCooldown;
+
+        if (!IsAlive) return;
+
+        Vector3 origin = transform.position;
+        Vector3 facing = transform.forward;
+
+        for (int i = 0; i < All.Count; i++)
+        {
+            PlayerMovement other = All[i];
+            if (other == null || other == this || !other.IsAlive) continue;
+
+            Vector3 delta = other.transform.position - origin;
+            delta.y = 0f;
+
+            float distance = delta.magnitude;
+            if (distance > pushRange || distance < 0.01f) continue;
+
+            Vector3 direction = delta / distance;
+            if (Vector3.Dot(facing, direction) < pushAimTolerance) continue;
+
+            other.ApplyKnockbackClientRpc(direction * pushForce + Vector3.up * pushUpForce);
+        }
+
+        PushPerformedClientRpc();
+    }
+
+    [ClientRpc]
+    private void ApplyKnockbackClientRpc(Vector3 impulse)
+    {
+        // Bewegung ist client-autoritativ - nur der Besitzer darf seinen Koerper bewegen.
+        if (!IsOwner) return;
+
+        moveDirection.x += impulse.x;
+        moveDirection.z += impulse.z;
+        moveDirection.y = Mathf.Max(moveDirection.y, impulse.y);
+
+        GameAudio.Instance?.PlayLand();
+    }
+
+    [ClientRpc]
+    private void PushPerformedClientRpc()
+    {
+        GameAudio.Instance?.PlayWhoosh();
+    }
+
+    [ServerRpc]
+    private void RequestEmoteServerRpc(int index)
+    {
+        if (index < 0 || index >= Emotes.Length) return;
+        ShowEmoteClientRpc(index);
+    }
+
+    [ClientRpc]
+    private void ShowEmoteClientRpc(int index)
+    {
+        if (nametag == null || index < 0 || index >= Emotes.Length) return;
+        nametag.ShowEmote(Emotes[index], EmoteDuration);
     }
 
     // Höhe UND Center anpassen, damit die Füße beim Ducken auf dem Boden bleiben

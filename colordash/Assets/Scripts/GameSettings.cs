@@ -9,6 +9,7 @@ public static class GameSettings
     private const string KeyMasterVolume = "cd.masterVolume";
     private const string KeySfxVolume = "cd.sfxVolume";
     private const string KeyPlayerName = "cd.playerName";
+    private const string KeyBestRound = "cd.bestRound";
 
     public const float MinSensitivity = 0.25f;
     public const float MaxSensitivity = 8f;
@@ -21,6 +22,7 @@ public static class GameSettings
     private static float masterVolume;
     private static float sfxVolume;
     private static string playerName;
+    private static int bestRound;
 
     static GameSettings()
     {
@@ -29,6 +31,21 @@ public static class GameSettings
         masterVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(KeyMasterVolume, 0.8f));
         sfxVolume = Mathf.Clamp01(PlayerPrefs.GetFloat(KeySfxVolume, 0.8f));
         playerName = PlayerPrefs.GetString(KeyPlayerName, "");
+        bestRound = Mathf.Max(0, PlayerPrefs.GetInt(KeyBestRound, 0));
+    }
+
+    // Höchste je erreichte Runde auf diesem Gerät. 0 = noch kein Lauf beendet.
+    public static int BestRound => bestRound;
+
+    // Meldet das Ergebnis eines Laufs und gibt true zurück, wenn es ein neuer Rekord war.
+    public static bool ReportRound(int round)
+    {
+        if (round <= bestRound) return false;
+
+        bestRound = round;
+        PlayerPrefs.SetInt(KeyBestRound, bestRound);
+        Commit();
+        return true;
     }
 
     public static float MouseSensitivity

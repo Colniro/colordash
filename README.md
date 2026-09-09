@@ -36,6 +36,29 @@ optional über Unity Relay ohne Portfreigabe).
 Im **Einzelspieler**-Modus spielt man alleine gegen die steigende Schwierigkeit — Ziel ist,
 möglichst viele Runden zu überleben.
 
+### Runden-Modifikatoren
+
+Ab Runde 10 ist in **jeder** Runde genau einer von drei Modifikatoren aktiv, der oben rechts
+unter der Rundenanzeige eingeblendet wird:
+
+| Modifikator | Wirkung |
+|---|---|
+| **Rutschiger Boden** | Beschleunigung stark reduziert — man schlittert weit über sein Ziel hinaus |
+| **Niedrige Schwerkraft** | Schwerkraft runter, Sprungkraft rauf — lange, schwebende Sprünge |
+| **Umgekehrte Kamera** | Beide Mausachsen sind invertiert |
+
+### Schubsen & Emotes
+
+Mit `F` schubst man Mitspieler in Blickrichtung weg (kurze Abklingzeit, wirkt nur in einem
+Kegel nach vorn) — ideal, um jemanden im letzten Moment von der richtigen Farbe zu befördern.
+Über die Tasten `1`–`4` gibt es kurze Emotes, die als Sprechblase über dem eigenen Kopf
+erscheinen. Beides läuft über den Server, damit niemand fremde Spieler direkt manipulieren kann.
+
+### Persönlicher Rekord
+
+Die höchste je erreichte Runde wird pro Gerät gespeichert (`PlayerPrefs`) und dauerhaft im HUD
+angezeigt. Wird der Rekord übertroffen, erscheint das am Rundenende zusätzlich im Ergebnis-Banner.
+
 ## Steuerung
 
 | Taste | Aktion |
@@ -46,6 +69,8 @@ möglichst viele Runden zu überleben.
 | `Shift` (halten) | Rennen |
 | `R` (halten) | Ducken |
 | `E` | Bereit / Nicht bereit (auf der Lobby-Plattform) |
+| `F` | Mitspieler schubsen |
+| `1` `2` `3` `4` | Emote über dem eigenen Kopf zeigen |
 | `Esc` | Pausenmenü (Einstellungen, Partie verlassen, Beenden) |
 | Zuschauer-Modus: `A` / `D` oder Maustasten | Zwischen lebenden Spielern wechseln |
 
@@ -129,7 +154,8 @@ Alle in `colordash/Assets/Scripts/`:
 |---|---|
 | [`GameFlowManager.cs`](colordash/Assets/Scripts/Multiplayer/GameFlowManager.cs) | Hauptmenü (Singleplayer / Lobby erstellen / Beitreten via Relay), Lobby-/Rundenablauf, Spieler-Slots, Sieger-Ermittlung, Verbindungs-/Disconnect-Handling |
 | [`ColorDashManager.cs`](colordash/Assets/Scripts/ColorDashManager.cs) | Serverautoritative Rundenlogik: Farbansagen, Countdown, Schwierigkeitskurve, Ansage- und Sequenz-UI |
-| [`PlayerMovement.cs`](colordash/Assets/Scripts/PlayerMovement.cs) | Ego-Perspektive-Steuerung (Laufen/Rennen/Springen/Ducken), Absturzerkennung, Netzwerk-Teleport |
+| [`PlayerMovement.cs`](colordash/Assets/Scripts/PlayerMovement.cs) | Ego-Perspektive-Steuerung (Laufen/Rennen/Springen/Ducken), Schubsen, Emotes, Rundenmodifikatoren, Absturzerkennung, Netzwerk-Teleport |
+| [`PlayerNametag.cs`](colordash/Assets/Scripts/PlayerNametag.cs) | Schwebendes Namensschild über jedem Spieler, zeigt auch Emotes an |
 | [`ReadyButtonZone.cs`](colordash/Assets/Scripts/Multiplayer/ReadyButtonZone.cs) | Trigger-Zone auf der Lobby-Plattform für den Bereit-Status |
 | [`TileAnimator.cs`](colordash/Assets/Scripts/TileAnimator.cs) | Wackel-Vorwarnung und Wegkipp-Animation der Plattformen |
 | [`SpectatorCamera.cs`](colordash/Assets/Scripts/SpectatorCamera.cs) | Freie Zuschauerkamera für ausgeschiedene Spieler |
@@ -154,6 +180,7 @@ Am `ColorDashManager`-GameObject in der Szene (Inspector):
 | `hiddenDuration` | 4 s | Wie lange die "falschen" Plattformen verschwunden bleiben |
 | `multiAnnounceStartRound` | 10 | Ab welcher Runde mehrere Farben nacheinander angesagt werden |
 | `maxAnnounceCount` | 4 | Maximale Anzahl Farben pro Ansage-Sequenz |
+| `modifierStartRound` | 10 | Ab welcher Runde immer ein Rundenmodifikator aktiv ist |
 | `wobbleLeadTime` | 1.2 s | Vorwarnzeit, bevor Plattformen wackeln/verschwinden |
 | `urgentTickTime` | 1.5 s | Ab wann das Countdown-Ticken hektischer wird |
 
@@ -171,6 +198,8 @@ Am `GameFlowManager`-GameObject:
 - Ohne konfiguriertes Unity-Cloud-Projekt (Relay/Authentication) ist nur der
   Einzelspieler-Modus nutzbar.
 - Es gibt aktuell nur ein Arenen-Layout.
+- Der persönliche Rekord liegt in den lokalen `PlayerPrefs` — es gibt keine geräteübergreifende
+  oder gemeinsame Bestenliste.
 
 ## Verwendete Assets & Lizenzen
 
